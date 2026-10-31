@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#07110f" />
+  <title>NEON SERPENT — Gelişmiş Yılan Oyunu</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="noise"></div>
+  <main class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Neon Serpent ana sayfa">
+        <span class="brand-mark">S</span>
+        <span><strong>NEON</strong> SERPENT</span>
+      </a>
+      <div class="status-pill"><i></i> SİSTEM ÇEVRİMİÇİ</div>
+      <button id="soundBtn" class="icon-btn" aria-label="Sesi aç veya kapat">SES: AÇIK</button>
+    </header>
+
+    <section class="game-layout">
+      <aside class="side-panel left-panel">
+        <div class="eyebrow">KOŞU VERİLERİ</div>
+        <div class="big-stat">
+          <span>SKOR</span>
+          <strong id="score">000000</strong>
+        </div>
+        <div class="stat-grid">
+          <div><span>EN İYİ</span><b id="best">000000</b></div>
+          <div><span>SEVİYE</span><b id="level">01</b></div>
+        </div>
+        <div class="meter-block">
+          <div class="meter-label"><span>ENERJİ</span><b id="energyText">100%</b></div>
+          <div class="meter"><i id="energyBar"></i></div>
+          <small>Boşluk ile hız patlaması</small>
+        </div>
+        <div class="mission-card">
+          <span class="mission-kicker">AKTİF HEDEF</span>
+          <strong id="missionTitle">5 çekirdek topla</strong>
+          <div class="mission-progress"><i id="missionBar"></i></div>
+          <small id="missionText">0 / 5</small>
+        </div>
+      </aside>
+
+      <section class="arena-wrap">
+        <div class="arena-frame">
+          <div class="corner tl"></div><div class="corner tr"></div>
+          <div class="corner bl"></div><div class="corner br"></div>
+          <canvas id="game" width="720" height="720" aria-label="Yılan oyun alanı"></canvas>
+
+          <div id="startScreen" class="screen-overlay active">
+            <div class="overlay-content">
+              <div class="snake-emblem"><span></span><i></i></div>
+              <p class="eyebrow">PROTOKOL // 07</p>
+              <h1>NEON<br><em>SERPENT</em></h1>
+              <p class="subtitle">Arenayı ele geçir. Zinciri büyüt.<br>Duvara dönüşmeden önce efsaneye dönüş.</p>
+              <div class="difficulty" role="group" aria-label="Zorluk seçimi">
+                <button data-difficulty="rookie">ÇAYLAK</button>
+                <button data-difficulty="normal" class="selected">OPERATÖR</button>
+                <button data-difficulty="insane">KÂBUS</button>
+              </div>
+              <button id="startBtn" class="primary-btn"><span>OYUNU BAŞLAT</span><b>→</b></button>
+              <small class="controls-hint">WASD / OK TUŞLARI • BOŞLUK: DASH • P: DURAKLAT</small>
+            </div>
+          </div>
+
+          <div id="pauseScreen" class="screen-overlay compact">
+            <div class="overlay-content">
+              <p class="eyebrow">SİMÜLASYON BEKLEMEDE</p>
+              <h2>DURAKLATILDI</h2>
+              <button id="resumeBtn" class="primary-btn"><span>DEVAM ET</span><b>▶</b></button>
+            </div>
+          </div>
+
+          <div id="gameOverScreen" class="screen-overlay compact">
+            <div class="overlay-content">
+              <p class="eyebrow danger">BAĞLANTI KESİLDİ</p>
+              <h2>KOŞU SONA ERDİ</h2>
+              <div class="result-score"><span>TOPLAM SKOR</span><strong id="finalScore">0</strong></div>
+              <p id="resultNote">Ağ seni tüketti.</p>
+              <button id="restartBtn" class="primary-btn"><span>TEKRAR DENE</span><b>↻</b></button>
+            </div>
+          </div>
+        </div>
+        <div class="arena-footer">
+          <span><i class="key">WASD</i> YÖNLENDİR</span>
+          <span><i class="key wide">SPACE</i> DASH</span>
+          <span><i class="key">P</i> DURAKLAT</span>
+        </div>
+      </section>
+
+      <aside class="side-panel right-panel">
+        <div class="eyebrow">CANLI DURUM</div>
+        <div class="combo-card">
+          <span>KOMBON</span>
+          <strong><b id="combo">1</b><em>×</em></strong>
+          <small id="comboTimer">Zinciri sürdür</small>
+        </div>
+        <div class="power-list">
+          <div class="power-item" id="shieldPower">
+            <i class="power-icon shield">◇</i>
+            <span><b>KALKAN</b><small>Çarpışmayı engeller</small></span>
+            <em id="shieldStatus">PASİF</em>
+          </div>
+          <div class="power-item" id="phasePower">
+            <i class="power-icon phase">◎</i>
+            <span><b>FAZ</b><small>Duvarlardan geç</small></span>
+            <em id="phaseStatus">PASİF</em>
+          </div>
+          <div class="power-item" id="magnetPower">
+            <i class="power-icon magnet">⌁</i>
+            <span><b>MIKNATIS</b><small>Çekirdekleri yakala</small></span>
+            <em id="magnetStatus">PASİF</em>
+          </div>
+        </div>
+        <div class="legend">
+          <span><i class="dot core"></i> ENERJİ ÇEKİRDEĞİ</span>
+          <span><i class="dot rare"></i> NADİR PARÇA</span>
+          <span><i class="dot hazard"></i> TEHLİKE BLOĞU</span>
+        </div>
+      </aside>
+    </section>
+
+    <section class="mobile-controls" aria-label="Mobil kontroller">
+      <button data-dir="up">▲</button>
+      <button data-dir="left">◀</button>
+      <button class="dash-mobile" id="dashBtn">DASH</button>
+      <button data-dir="right">▶</button>
+      <button data-dir="down">▼</button>
+    </section>
+  </main>
+  <div id="toast" class="toast">GÖREV TAMAMLANDI</div>
+  <script src="game.js"></script>
+</body>
+</html>
