@@ -256,8 +256,8 @@ function stoneTexture() {
       for (let c = -1; c <= cols; c++) {
         const x = c * bw + off;
         const y = row * bh;
-        const L = 0.9 + r() * 0.16;
-        const warm = r() * 0.08;
+        const L = 0.86 + r() * 0.24;
+        const warm = r() * 0.1;
         const base = [
           Math.round(204 * L * (1 + warm)),
           Math.round(186 * L),
@@ -497,6 +497,14 @@ export function buildWorld(scene: THREE.Scene) {
     root.add(m);
   };
   pillarMesh(shafts.map(g => shadeVertices(g, (_x, y) => 0.7 + 0.3 * smoothstep(0, 5, y))), toon(C.pillar, { vertexColors: true }));
+  // Sütun başlıklarına ince halka (astragal): taş detayını artırır
+  const rings: THREE.BufferGeometry[] = [];
+  for (const x of PILLAR_X) {
+    for (const s of [-1, 1]) {
+      rings.push(new THREE.TorusGeometry(PILLAR_R * 0.98, 0.08, 6, 16).rotateX(Math.PI / 2).translate(x, WALL_H - 0.85, s * PILLAR_Z));
+    }
+  }
+  pillarMesh(rings, toon(C.capital));
   pillarMesh(bases, toon(C.capital));
   pillarMesh(capitals, toon(C.capital));
 
@@ -707,7 +715,7 @@ export function buildWorld(scene: THREE.Scene) {
       color: 0xffe3b0,
       size: 0.14,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.75,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       fog: false,
