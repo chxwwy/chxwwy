@@ -237,7 +237,7 @@ export class Game {
   hudT = 0;
   locked = false;
   onHUD: (hud: CombatHUD) => void;
-  get targets(): CombatTarget[] { return [...this.dummies, this.boss]; }
+  get targets(): CombatTarget[] { return BOSS_AI_ENABLED ? [...this.dummies, this.boss] : [...this.dummies]; }
   overlay: HTMLDivElement;
   hpBars: { el: HTMLDivElement; fill: HTMLDivElement; d: Dummy }[] = [];
   keys = new Set<string>();
@@ -348,11 +348,8 @@ export class Game {
     this.hg.root.rotation.y = this.hgRy;
 
     // mankenler
-    const dpos: [number, number][] = [
-      [-16, -6.1],
-      [-6, 6.1],
-      [4, -6.1],
-    ];
+    // Kukla yok: sahnede hedef/manken görünmesin
+    const dpos: [number, number][] = [];
     for (const [x, z] of dpos) {
       const d = new Dummy(x, z);
       this.dummies.push(d);
@@ -761,6 +758,7 @@ export class Game {
     if (this.hgState !== 'idle' || this.assistCooldown > 0) return;
     this.assistCooldown = 12;
     const d = this.nearestDummy(this.pos, 80) ?? this.dummies[0];
+    if (!d) return;
     this.hgTarget = d;
     this.hgState = 'walk';
     this.hg.setFace('normal');

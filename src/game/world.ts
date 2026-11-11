@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { toon } from './toon';
 
 export interface Circle {
@@ -7,82 +8,200 @@ export interface Circle {
   r: number;
 }
 
-// Oyuncunun gidebileceği sınırlar (katedral iç mekânı: uzun ve dar nef)
+// Oyuncunun gezebileceği iç alan sınırları
 export const ARENA_X = 31;
 export const ARENA_Z = 12.5;
 
 const HALF_LEN = 32; // nef yarı uzunluğu (x)
-const HALF_W = 14; // nef yarı genişliği (z)
-const WALL_H = 20; // duvar yüksekliği
-const VAULT_R = 14; // tonoz yarıçapı (z yönünde)
+const HALF_W = 14; // nef yarı genişliği (z): geniş ama ince bir nef için dar tutuldu
+const WALL_H = 20; // duvar yüksekliği; tonoz bu hizadan başlar
 
-// Sıcak, açık renk paleti
+// Simetrik sütunlar: iki uzun duvara bağlı (yarısı duvarın içinde)
+const PILLAR_X = [-24, -12, 0, 12, 24];
+const PILLAR_Z = HALF_W - 0.45;
+const PILLAR_R = 0.8;
+
+// Her yanda 2 küçük pencere, sütunların arasına yerleşik
+const SIDE_WIN_X = [-18, 18];
+const SIDE_WIN = { w: 2.4, h: 6.2, y0: 7.5 };
+
+// Tek büyük pencere: nefin doğu ucunda, kürsünün arkasında
+const MAIN_WIN = { w: 6.4, h: 11, y0: 4.5 };
+
+// Kapı: batı ucunda, sade ahşap
+const DOOR = { w: 3.0, h: 5.8 };
+
+// Sıralar: koridorun iki yanında, kürsüye bakacak şekilde (oturma yüzü +x)
+const PEW_ROWS = [-24, -19, -14, -9, 9, 14, 19];
+const PEW_SEGS: [number, number][] = [
+  [2.4, 6.4],
+  [7.6, 11.6],
+];
+const PEW_LEN = 4.0;
+
 const C = {
-  wall: 0xb98b6c,
-  vault: 0xd9b78f,
+  wall: 0xbf9274,
+  vault: 0xdcbc96,
   floor: 0xdcbb93,
-  carpet: 0x9e4f45,
+  floorLine: 0xc69f74,
   pillar: 0xd2ac86,
   capital: 0xe8cfa6,
-  pew: 0x8e5f40,
-  pewSeat: 0x9f6d4b,
+  rib: 0xcaa27a,
+  stone: 0xe3c9a0,
   dais: 0xcaa27a,
   altar: 0x7a4a36,
-  altarCloth: 0xf2e4c8,
-  doorPanel: 0xe2c496,
-  doorFrame: 0xf4e4c4,
-  glass: 0xffb25e,
-  mullion: 0x6b4a33,
+  cloth: 0xf2e4c8,
+  pew: 0x9c6a43,
+  pewEnd: 0x84553a,
+  doorLeaf: 0x8b5a34,
+  doorPanel: 0x744a2b,
+  knob: 0xd9b06a,
 };
 
-// Pencere ışık konisi dokusu: alt kısım (pencere) parlak, üst kısım (zemin) sönük
-function coneTexture() {
+function canvasTexture(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void) {
   const c = document.createElement('canvas');
-  c.width = 4;
-  c.height = 256;
-  const g = c.getContext('2d')!;
-  const v = g.createLinearGradient(0, 256, 0, 0);
-  v.addColorStop(0, 'rgba(255,214,150,0.95)');
-  v.addColorStop(0.55, 'rgba(255,200,130,0.4)');
-  v.addColorStop(1, 'rgba(255,190,110,0)');
-  g.fillStyle = v;
-  g.fillRect(0, 0, 4, 256);
+  c.width = w;
+  c.height = h;
+  draw(c.getContext('2d')!);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
-// Kemerli pencere geometrisi (XY düzleminde; genişlik w, alt y0, yükseklik h)
-function archWindowGeo(w: number, h: number, y0: number) {
+// Kemerli (sivri olmayan, yuvarlak tepeli) yol: tabanı y0, genişliği w, dikey kısmı h
+function addArch(path: THREE.Path, w: number, h: number, y0: number) {
   const r = w / 2;
-  const shape = new THREE.Shape();
-  shape.moveTo(-r, y0);
-  shape.lineTo(r, y0);
-  shape.lineTo(r, y0 + h - r);
-  shape.absarc(0, y0 + h - r, r, 0, Math.PI, false);
-  shape.lineTo(-r, y0);
-  return new THREE.ShapeGeometry(shape, 8);
+  const yc = y0 + h - r;
+  path.moveTo(-r, y0);
+  path.lineTo(r, y0);
+  path.lineTo(r, yc);
+  path.absarc(0, yc, r, 0, Math.PI, false);
+  path.lineTo(-r, y0);
 }
 
-// Kolon dizisi ve sıralar için konumlar
-const COLUMN_XS = [-24, -12, 0, 12, 24];
-const COLUMN_Z = 11.2;
+// Düz tabanlı, kemerli bir kutu parçası (tek geometri) — birleştirme için
+function box(w: number, h: number, d: number, x: number, y: number, z: number) {
+  return new THREE.BoxGeometry(w, h, d).translate(x, y, z);
+}
 
-const OBSTACLES: Circle[] = [];
-for (const x of COLUMN_XS) {
-  OBSTACLES.push({ x, z: COLUMN_Z, r: 0.95 });
-  OBSTACLES.push({ x, z: -COLUMN_Z, r: 0.95 });
+// Sütunun gövdesi, kaidesi ve başlığı
+function pillarParts(x: number, z: number) {
+  return {
+    shaft: new THREE.CylinderGeometry(PILLAR_R, PILLAR_R * 1.05, WALL_H - 0.8, 16).translate(x, (WALL_H - 0.8) / 2, z),
+    base: box(2.0, 0.6, 2.0, x, 0.3, z),
+    capital: box(1.9, 0.8, 1.9, x, WALL_H - 0.4, z),
+  };
+}
+
+// Tonoz: iki uzun duvar arasında yarım silindir yüzey
+function vaultGeometry() {
+  const seg = 28;
+  const pos: number[] = [];
+  const idx: number[] = [];
+  for (let i = 0; i <= seg; i++) {
+    const t = (Math.PI * i) / seg;
+    const y = WALL_H + HALF_W * Math.sin(t);
+    const z = HALF_W * Math.cos(t);
+    pos.push(-HALF_LEN, y, z, HALF_LEN, y, z);
+  }
+  for (let i = 0; i < seg; i++) {
+    const a = i * 2;
+    idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+// Tek bir sıra: oturma yüzü +x'e (kürsüye) bakar, sırtlık -x tarafındadır
+function pewParts(x: number, z: number) {
+  return {
+    wood: [
+      box(0.85, 0.14, PEW_LEN, x, 0.5, z), // oturak
+      box(0.14, 1.0, PEW_LEN, x - 0.42, 1.05, z), // sırtlık
+      box(0.7, 0.45, PEW_LEN - 0.4, x, 0.22, z), // gövde
+    ],
+    ends: [box(0.85, 1.0, 0.14, x, 0.5, z - PEW_LEN / 2 + 0.07), box(0.85, 1.0, 0.14, x, 0.5, z + PEW_LEN / 2 - 0.07)],
+  };
+}
+
+// Pencere camı: alttan üste aydınlık, sıcak turuncu-altın (opak, arkası görünmez)
+function glassTexture() {
+  return canvasTexture(128, 128, (g) => {
+    const r = g.createRadialGradient(64, 70, 4, 64, 64, 92);
+    r.addColorStop(0, '#fff0b4');
+    r.addColorStop(0.45, '#ffc46c');
+    r.addColorStop(1, '#b65f1e');
+    g.fillStyle = r;
+    g.fillRect(0, 0, 128, 128);
+  });
+}
+
+// Işık huzmesi dokusu: pencerede dolgun, zeminde yumuşak sönen; kenarları yumuşak
+function beamTexture() {
+  return canvasTexture(64, 128, (g) => {
+    // y=0 zemin, y=128 pencere: pencere yakınında sönük, orta gövdede parlak, zeminde sönük
+    const v = g.createLinearGradient(0, 0, 0, 128);
+    v.addColorStop(0, 'rgba(255,200,120,0)');
+    v.addColorStop(0.4, 'rgba(255,200,120,1)');
+    v.addColorStop(1, 'rgba(255,200,120,0.02)');
+    g.fillStyle = v;
+    g.fillRect(0, 0, 64, 128);
+    g.globalCompositeOperation = 'destination-in';
+    const h = g.createLinearGradient(0, 0, 64, 0);
+    h.addColorStop(0, 'rgba(0,0,0,0)');
+    h.addColorStop(0.5, 'rgba(0,0,0,1)');
+    h.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = h;
+    g.fillRect(0, 0, 64, 128);
+  });
+}
+
+// Yerdeki güneş amblemi (halının yerine)
+function sunTexture() {
+  return canvasTexture(512, 512, (g) => {
+    g.translate(256, 256);
+    g.strokeStyle = '#b8773a';
+    g.fillStyle = '#b8773a';
+    g.lineWidth = 16;
+    g.beginPath();
+    g.arc(0, 0, 190, 0, Math.PI * 2);
+    g.stroke();
+    g.beginPath();
+    g.arc(0, 0, 110, 0, Math.PI * 2);
+    g.fill();
+    for (let i = 0; i < 16; i++) {
+      const a = (i * Math.PI) / 8;
+      const a1 = a - 0.09;
+      const a2 = a + 0.09;
+      g.beginPath();
+      g.moveTo(Math.cos(a1) * 215, Math.sin(a1) * 215);
+      g.lineTo(Math.cos(a) * 275, Math.sin(a) * 275);
+      g.lineTo(Math.cos(a2) * 215, Math.sin(a2) * 215);
+      g.closePath();
+      g.fill();
+    }
+  });
+}
+
+function rnd(seed: number) {
+  let s = seed;
+  return () => {
+    s = (s * 16807) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
 }
 
 export function buildWorld(scene: THREE.Scene) {
   const fogColor = new THREE.Color(0xc69764);
   scene.background = fogColor;
-  scene.fog = new THREE.Fog(fogColor, 40, 115);
+  scene.fog = new THREE.Fog(fogColor, 38, 110);
 
-  // ışıklar
-  const hemi = new THREE.HemisphereLight(0xffe9c8, 0x6a4a44, 1.45);
+  const hemi = new THREE.HemisphereLight(0xffe9c8, 0x6a4a44, 1.25);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffdca0, 2.0);
+  const sun = new THREE.DirectionalLight(0xffdca0, 1.9);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   const sc = sun.shadow.camera;
@@ -91,215 +210,284 @@ export function buildWorld(scene: THREE.Scene) {
   sc.top = 26;
   sc.bottom = -26;
   sc.near = 1;
-  sc.far = 140;
+  sc.far = 120;
   sun.shadow.bias = -0.0006;
   sun.shadow.normalBias = 0.04;
   scene.add(sun, sun.target);
 
   const root = new THREE.Group();
   scene.add(root);
+  let disposed = false;
 
-  // Malzemeler
-  const wallMat = toon(C.wall);
-  const vaultMat = toon(C.vault, { side: THREE.DoubleSide });
-  const floorMat = toon(C.floor);
-  const carpetMat = toon(C.carpet);
-  const pillarMat = toon(C.pillar);
-  const capitalMat = toon(C.capital);
-  const pewMat = toon(C.pew);
-  const seatMat = toon(C.pewSeat);
-  const daisMat = toon(C.dais);
-  const altarMat = toon(C.altar);
-  const clothMat = toon(C.altarCloth);
-  const doorPanelMat = toon(C.doorPanel);
-  const doorFrameMat = toon(C.doorFrame);
-  const glassMat = new THREE.MeshBasicMaterial({ color: C.glass, side: THREE.DoubleSide, fog: false });
-  const mullionMat = toon(C.mullion);
+  const glassTex = glassTexture();
+  const beamTex = beamTexture();
+  const sunTex = sunTexture();
+  const floorTex = canvasTexture(128, 128, (g) => {
+    g.fillStyle = '#dcbb93';
+    g.fillRect(0, 0, 128, 128);
+    g.fillStyle = '#c69f74';
+    g.fillRect(0, 0, 128, 3);
+    g.fillRect(0, 0, 3, 128);
+  });
+  floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+  floorTex.repeat.set(HALF_LEN / 2, HALF_W / 2);
 
-  const add = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, cast = false) => {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(x, y, z);
-    m.castShadow = cast;
-    m.receiveShadow = true;
-    root.add(m);
-    return m;
-  };
-  const boxGeo = (w: number, h: number, d: number) => new THREE.BoxGeometry(w, h, d);
-
-  // Zemin ve sunak halısı
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(HALF_LEN * 2 + 2, HALF_W * 2 + 2), floorMat);
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  root.add(floor);
-  add(boxGeo(HALF_LEN * 2 - 2, 0.04, 5.2), carpetMat, 0, 0.02, 0);
-
-  // Duvarlar: iki uzun yan duvar, batı ve doğu kısa duvarlar
-  add(boxGeo(HALF_LEN * 2 + 2, WALL_H, 1), wallMat, 0, WALL_H / 2, HALF_W + 0.5);
-  add(boxGeo(HALF_LEN * 2 + 2, WALL_H, 1), wallMat, 0, WALL_H / 2, -HALF_W - 0.5);
-  add(boxGeo(1, WALL_H, HALF_W * 2 + 2), wallMat, HALF_LEN + 0.5, WALL_H / 2, 0);
-  add(boxGeo(1, WALL_H, HALF_W * 2 + 2), wallMat, -HALF_LEN - 0.5, WALL_H / 2, 0);
-
-  // Tonoz: duvar üstünden yukarı kavis eden yarım silindir (elle üretilmiş)
-  {
-    const NX = 32;
-    const NA = 18;
-    const pos: number[] = [];
-    const idx: number[] = [];
-    for (let j = 0; j <= NA; j++) {
-      const phi = (Math.PI * j) / NA;
-      const y = WALL_H + VAULT_R * Math.sin(phi);
-      const z = VAULT_R * Math.cos(phi);
-      for (let i = 0; i <= NX; i++) {
-        const x = -HALF_LEN + (2 * HALF_LEN * i) / NX;
-        pos.push(x, y, z);
-      }
-    }
-    for (let j = 0; j < NA; j++) {
-      for (let i = 0; i < NX; i++) {
-        const a = j * (NX + 1) + i;
-        const b = a + 1;
-        const c2 = a + (NX + 1);
-        const d = c2 + 1;
-        idx.push(a, c2, b, b, c2, d);
-      }
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    g.setIndex(idx);
-    g.computeVertexNormals();
-    const vault = new THREE.Mesh(g, vaultMat);
-    root.add(vault);
-  }
-
-  // Kolonlar ve başlıkları
-  for (const x of COLUMN_XS) {
-    for (const z of [COLUMN_Z, -COLUMN_Z]) {
-      const shaft = new THREE.CylinderGeometry(0.75, 0.9, WALL_H - 0.6, 10);
-      add(shaft, pillarMat, x, (WALL_H - 0.6) / 2, z, true);
-      add(boxGeo(2.0, 0.6, 2.0), capitalMat, x, 0.3, z);
-      add(boxGeo(2.1, 0.8, 2.1), capitalMat, x, WALL_H - 0.9, z);
-    }
-  }
-
-  // Sıralar: nefin iki yanında, orta koridor boş
-  const pewZs = [-7.8, -4.4, 4.4, 7.8];
-  for (const zc of pewZs) {
-    const back = zc + Math.sign(zc) * 0.5;
-    for (let x = -27; x <= 21; x += 3) {
-      add(boxGeo(2.6, 0.45, 1.1), seatMat, x + 1.3, 0.45, zc, true);
-      add(boxGeo(2.6, 1.1, 0.16), pewMat, x + 1.3, 1.0, back, true);
-    }
-  }
-
-  // Sunak kürsüsü (nefin doğu ucu)
-  add(boxGeo(7, 0.6, 9), daisMat, 27.5, 0.3, 0, true);
-  add(boxGeo(1.6, 1.1, 3), altarMat, 29.8, 1.15, 0, true);
-  add(boxGeo(1.8, 0.1, 3.2), clothMat, 29.8, 1.7, 0);
-
-  // Büyük ana pencere (doğu ucu, kürsünün arkası)
-  const bigGlass = new THREE.Mesh(archWindowGeo(7, 15, 4), glassMat);
-  bigGlass.position.set(HALF_LEN - 0.12, 0, 0);
-  bigGlass.rotation.y = Math.PI / 2;
-  root.add(bigGlass);
-  add(boxGeo(0.2, 0.2, 7.2), mullionMat, HALF_LEN - 0.2, 11.5, 0);
-  add(boxGeo(0.2, 15.6, 0.2), mullionMat, HALF_LEN - 0.2, 11.5, 0);
-  add(boxGeo(0.2, 15.6, 0.2), mullionMat, HALF_LEN - 0.2, 11.5, 1.8);
-  add(boxGeo(0.2, 15.6, 0.2), mullionMat, HALF_LEN - 0.2, 11.5, -1.8);
-
-  // Yan küçük pencereler: her iki yanda ikişer adet
-  const sideWindows: { x: number; z: number }[] = [
-    { x: -16, z: HALF_W - 0.1 },
-    { x: -4, z: HALF_W - 0.1 },
-    { x: -16, z: -HALF_W + 0.1 },
-    { x: -4, z: -HALF_W + 0.1 },
-  ];
-  const smallGeo = archWindowGeo(3, 8.5, 6.5);
-  for (const sw of sideWindows) {
-    const g = new THREE.Mesh(smallGeo, glassMat);
-    g.position.set(sw.x, 0, sw.z);
-    if (sw.z < 0) g.rotation.y = Math.PI;
-    root.add(g);
-  }
-
-  // Kapı (batı ucu): düşük poligonlu, açık renkli, basit
-  add(boxGeo(0.3, 8.2, 5.2), doorFrameMat, -HALF_LEN + 0.2, 4.1, 0);
-  add(boxGeo(0.25, 7.2, 4.2), doorPanelMat, -HALF_LEN + 0.45, 3.6, 0);
-
-  // Işık konileri: büyük pencereden zemine, yan pencerelerden daha küçük
-  const coneTex = coneTexture();
-  const coneMat = new THREE.MeshBasicMaterial({
-    map: coneTex,
-    color: 0xffb865,
+  const glassMat = new THREE.MeshBasicMaterial({ map: glassTex, side: THREE.DoubleSide, fog: false });
+  const beamMainMat = new THREE.MeshBasicMaterial({
+    map: beamTex,
+    color: 0xffb060,
     transparent: true,
-    opacity: 0.6,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     side: THREE.DoubleSide,
+    opacity: 0.3,
     fog: false,
   });
-  const coneGeos: THREE.BufferGeometry[] = [];
+  const beamSideMat = beamMainMat.clone();
+  beamSideMat.opacity = 0.17;
 
-  const addCone = (
-    from: THREE.Vector3,
-    inward: THREE.Vector3,
-    slope: number,
-    topR: number,
-    bottomR: number
-  ) => {
-    const dir = new THREE.Vector3(inward.x, -slope, inward.z).normalize();
-    const length = from.y / Math.abs(dir.y);
-    const geo = new THREE.CylinderGeometry(topR, bottomR, length, 24, 1, true);
-    coneGeos.push(geo);
-    const cone = new THREE.Mesh(geo, coneMat);
-    cone.position.copy(from).addScaledVector(dir, length / 2);
-    cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-    cone.renderOrder = 3;
-    root.add(cone);
-    return { dir, length };
-  };
+  const wallMat = toon(C.wall);
+  const stoneMat = toon(C.stone);
 
-  // büyük pencere: iki koni (dış geniş, iç dar)
-  const bigFrom = new THREE.Vector3(HALF_LEN - 0.3, 11.5, 0);
-  const bigIn = new THREE.Vector3(-1, 0, 0);
-  const big = addCone(bigFrom, bigIn, 0.85, 6.2, 3.2);
-  addCone(bigFrom, bigIn, 0.85, 4.0, 2.0);
-  // zemindeki ışık havuzu
-  const landX = bigFrom.x + big.dir.x * big.length;
-  const pool = new THREE.Mesh(
-    new THREE.CircleGeometry(5.5, 32),
-    new THREE.MeshBasicMaterial({
-      map: coneTex,
-      color: 0xffc070,
-      transparent: true,
-      opacity: 0.45,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      fog: false,
-    })
-  );
-  pool.rotation.x = -Math.PI / 2;
-  pool.position.set(landX, 0.05, 0);
-  root.add(pool);
+  // Zemin ve duvarlar
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(HALF_LEN * 2, HALF_W * 2), toon(0xffffff, { map: floorTex }));
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  root.add(floor);
 
-  // yan pencere konileri
-  for (const sw of sideWindows) {
-    const from = new THREE.Vector3(sw.x, 11, sw.z > 0 ? HALF_W - 0.5 : -HALF_W + 0.5);
-    const inward = new THREE.Vector3(0, 0, sw.z > 0 ? -1 : 1);
-    addCone(from, inward, 0.85, 2.6, 1.0);
+  const wallGeo = [
+    new THREE.BoxGeometry(HALF_LEN * 2 + 1.2, WALL_H, 0.6).translate(0, WALL_H / 2, HALF_W + 0.3),
+    new THREE.BoxGeometry(HALF_LEN * 2 + 1.2, WALL_H, 0.6).translate(0, WALL_H / 2, -HALF_W - 0.3),
+    new THREE.BoxGeometry(0.6, WALL_H, HALF_W * 2 + 1.2).translate(HALF_LEN + 0.3, WALL_H / 2, 0),
+    new THREE.BoxGeometry(0.6, WALL_H, HALF_W * 2 + 1.2).translate(-HALF_LEN - 0.3, WALL_H / 2, 0),
+  ];
+  for (const g of wallGeo) {
+    const m = new THREE.Mesh(g, wallMat);
+    m.receiveShadow = true;
+    root.add(m);
   }
 
-  // Toz zerrecikleri
-  const N = 600;
+  // Tonoz ve tonoz kaburgaları
+  const vault = new THREE.Mesh(vaultGeometry(), toon(C.vault, { side: THREE.DoubleSide }));
+  vault.receiveShadow = true;
+  root.add(vault);
+  const ribMat = toon(C.rib);
+  for (const x of PILLAR_X) {
+    const rib = new THREE.Mesh(new THREE.TorusGeometry(HALF_W, 0.38, 8, 40, Math.PI), ribMat);
+    rib.rotation.y = Math.PI / 2;
+    rib.position.set(x, WALL_H, 0);
+    root.add(rib);
+  }
+
+  // Sütunlar (duvara bağlı, simetrik)
+  const shafts: THREE.BufferGeometry[] = [];
+  const bases: THREE.BufferGeometry[] = [];
+  const capitals: THREE.BufferGeometry[] = [];
+  const pillarCircles: Circle[] = [];
+  for (const x of PILLAR_X) {
+    for (const s of [-1, 1]) {
+      const z = s * PILLAR_Z;
+      const p = pillarParts(x, z);
+      shafts.push(p.shaft);
+      bases.push(p.base);
+      capitals.push(p.capital);
+      pillarCircles.push({ x, z, r: PILLAR_R });
+    }
+  }
+  const pillarMesh = (geos: THREE.BufferGeometry[], mat: THREE.Material) => {
+    const m = new THREE.Mesh(mergeGeometries(geos)!, mat);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    root.add(m);
+  };
+  pillarMesh(shafts, toon(C.pillar));
+  pillarMesh(bases, toon(C.capital));
+  pillarMesh(capitals, toon(C.capital));
+
+  // Duvarda yatay kornişler (sütunları birbirine bağlar)
+  for (const s of [-1, 1]) {
+    const cornice = new THREE.Mesh(new THREE.BoxGeometry(HALF_LEN * 2, 0.6, 0.5), toon(C.capital));
+    cornice.position.set(0, 16.2, s * (HALF_W - 0.25));
+    root.add(cornice);
+  }
+
+  // Pencere çerçevesi (taş) ve cam: kemerli yüzey, içinde çubuk yok
+  function addWindow(x: number, rotY: number, win: { w: number; h: number; y0: number }, frameZ: number, glassZ: number, frameDepth = 0.3) {
+    const grp = new THREE.Group();
+    grp.position.set(x, 0, 0);
+    grp.rotation.y = rotY;
+    root.add(grp);
+    const t = 0.3;
+    const outer = new THREE.Shape();
+    addArch(outer, win.w + 2 * t, win.h + 2 * t, win.y0 - t);
+    const hole = new THREE.Path();
+    addArch(hole, win.w, win.h, win.y0);
+    outer.holes.push(hole);
+    const frame = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(outer, { depth: frameDepth, bevelEnabled: false, curveSegments: 14 }),
+      stoneMat
+    );
+    frame.position.z = frameZ;
+    grp.add(frame);
+    const gShape = new THREE.Shape();
+    addArch(gShape, win.w, win.h, win.y0);
+    const glass = new THREE.Mesh(new THREE.ShapeGeometry(gShape, 14), glassMat);
+    glass.position.z = glassZ;
+    grp.add(glass);
+    return grp;
+  }
+
+  // Yan pencereler: iki uzun duvarda, her birinde 2 adet
+  for (const x of SIDE_WIN_X) {
+    addWindow(x, 0, SIDE_WIN, HALF_W - 0.3, HALF_W - 0.12);
+    addWindow(x, Math.PI, SIDE_WIN, HALF_W - 0.3, HALF_W - 0.12);
+  }
+
+  // Büyük pencere: doğu ucunda (x = +HALF_LEN), kürsünün arkasında
+  addWindow(HALF_LEN, -Math.PI / 2, MAIN_WIN, 0.05, 0.12, 0.35);
+
+  // Kapı: batı ucunda, sade ahşap kapı (taş pervaz/halka yok)
+  {
+    const grp = new THREE.Group();
+    grp.position.set(-HALF_LEN, 0, 0);
+    grp.rotation.y = Math.PI / 2;
+    root.add(grp);
+    const t = 0.22;
+    const outer = new THREE.Shape();
+    addArch(outer, DOOR.w + 2 * t, DOOR.h + t, 0);
+    const hole = new THREE.Path();
+    addArch(hole, DOOR.w, DOOR.h, 0);
+    outer.holes.push(hole);
+    const frame = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(outer, { depth: 0.3, bevelEnabled: false, curveSegments: 14 }),
+      toon(C.stone)
+    );
+    frame.position.z = 0.05;
+    grp.add(frame);
+    const leafShape = new THREE.Shape();
+    addArch(leafShape, DOOR.w, DOOR.h, 0);
+    const leaf = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(leafShape, { depth: 0.22, bevelEnabled: false, curveSegments: 14 }),
+      toon(C.doorLeaf)
+    );
+    leaf.position.z = 0.1;
+    grp.add(leaf);
+    const panelMat = toon(C.doorPanel);
+    const pTop = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.7, 0.06), panelMat);
+    pTop.position.set(0, 3.6, 0.36);
+    const pBot = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.7, 0.06), panelMat);
+    pBot.position.set(0, 1.25, 0.36);
+    grp.add(pTop, pBot);
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), toon(C.knob));
+    knob.position.set(1.0, 2.5, 0.42);
+    grp.add(knob);
+  }
+
+  // Kürsü: taş sahanlık ve sunak (pencerenin önünde)
+  {
+    const dais = new THREE.Mesh(new THREE.BoxGeometry(7.0, 0.8, 8.4), toon(C.dais));
+    dais.position.set(27.5, 0.4, 0);
+    dais.receiveShadow = true;
+    root.add(dais);
+    const altar = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.1, 4.2), toon(C.altar));
+    altar.position.set(29.2, 1.35, 0);
+    altar.castShadow = true;
+    root.add(altar);
+    const cloth = new THREE.Mesh(new THREE.BoxGeometry(2.35, 0.1, 4.35), toon(C.cloth));
+    cloth.position.set(29.2, 1.95, 0);
+    root.add(cloth);
+  }
+
+  // Güneş amblemi: yerde, nefin ortasında
+  {
+    const sunDecal = new THREE.Mesh(
+      new THREE.PlaneGeometry(8, 8),
+      new THREE.MeshBasicMaterial({ map: sunTex, transparent: true, depthWrite: false, fog: false, opacity: 0.85 })
+    );
+    sunDecal.rotation.x = -Math.PI / 2;
+    sunDecal.position.y = 0.015;
+    root.add(sunDecal);
+  }
+
+  // Sıralar: iki yanda, seyrek, koridor boş
+  {
+    const woodGeos: THREE.BufferGeometry[] = [];
+    const endGeos: THREE.BufferGeometry[] = [];
+    for (const x of PEW_ROWS) {
+      for (const [a, b] of PEW_SEGS) {
+        for (const s of [-1, 1]) {
+          const zc = (s * (a + b)) / 2;
+          const p = pewParts(x, zc);
+          woodGeos.push(...p.wood);
+          endGeos.push(...p.ends);
+        }
+      }
+    }
+    const woodMesh = new THREE.Mesh(mergeGeometries(woodGeos)!, toon(C.pew));
+    const endMesh = new THREE.Mesh(mergeGeometries(endGeos)!, toon(C.pewEnd));
+    for (const m of [woodMesh, endMesh]) {
+      m.castShadow = true;
+      m.receiveShadow = true;
+      root.add(m);
+    }
+  }
+
+  // Işık huzmeleri: pencere boyutuna göre, iki düzlemli hacim
+  const beamAxisQuad = (from: THREE.Vector3, to: THREE.Vector3, topW: number, botW: number, axis: THREE.Vector3) => {
+    const a = from.clone().addScaledVector(axis, -topW / 2);
+    const b = from.clone().addScaledVector(axis, topW / 2);
+    const c = to.clone().addScaledVector(axis, botW / 2);
+    const d = to.clone().addScaledVector(axis, -botW / 2);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, d.x, d.y, d.z], 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+    g.setIndex([0, 1, 2, 0, 2, 3]);
+    return g;
+  };
+  const addBeam = (from: THREE.Vector3, to: THREE.Vector3, topW: number, botW: number, axis1: THREE.Vector3, mat: THREE.Material) => {
+    const dir = new THREE.Vector3().subVectors(to, from).normalize();
+    const axis2 = new THREE.Vector3().crossVectors(dir, axis1).normalize();
+    for (const axis of [axis1, axis2]) {
+      const m = new THREE.Mesh(beamAxisQuad(from, to, topW, botW, axis), mat);
+      m.renderOrder = 4;
+      root.add(m);
+    }
+  };
+  // Büyük pencere: en belirgin huzme
+  addBeam(
+    new THREE.Vector3(HALF_LEN - 0.8, MAIN_WIN.y0 + MAIN_WIN.h * 0.5, 0),
+    new THREE.Vector3(5, 0.02, 0),
+    MAIN_WIN.w * 0.95,
+    15,
+    new THREE.Vector3(0, 0, 1),
+    beamMainMat
+  );
+  // Yan pencereler: daha zayıf
+  for (const x of SIDE_WIN_X) {
+    for (const s of [-1, 1]) {
+      addBeam(
+        new THREE.Vector3(x, SIDE_WIN.y0 + SIDE_WIN.h * 0.5, s * (HALF_W - 0.9)),
+        new THREE.Vector3(x + 5, 0.02, s * 3.5),
+        SIDE_WIN.w * 0.95,
+        5.5,
+        new THREE.Vector3(1, 0, 0),
+        beamSideMat
+      );
+    }
+  }
+
+  // Toz zerrecikleri (sıcak, hafif)
+  const N = 500;
   const dp = new Float32Array(N * 3);
   const dv = new Float32Array(N * 3);
   const rr = rnd(99);
   for (let i = 0; i < N; i++) {
-    dp[i * 3] = (rr() - 0.5) * 90;
+    dp[i * 3] = (rr() - 0.5) * 60;
     dp[i * 3 + 1] = rr() * 20;
     dp[i * 3 + 2] = (rr() - 0.5) * 26;
-    dv[i * 3] = (rr() - 0.5) * 0.3;
-    dv[i * 3 + 1] = 0.05 + rr() * 0.2;
-    dv[i * 3 + 2] = (rr() - 0.5) * 0.3;
+    dv[i * 3] = (rr() - 0.5) * 0.25;
+    dv[i * 3 + 1] = 0.04 + rr() * 0.15;
+    dv[i * 3 + 2] = (rr() - 0.5) * 0.25;
   }
   const dg = new THREE.BufferGeometry();
   dg.setAttribute('position', new THREE.BufferAttribute(dp, 3));
@@ -309,7 +497,7 @@ export function buildWorld(scene: THREE.Scene) {
       color: 0xffe3b0,
       size: 0.14,
       transparent: true,
-      opacity: 0.75,
+      opacity: 0.6,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       fog: false,
@@ -319,37 +507,34 @@ export function buildWorld(scene: THREE.Scene) {
   scene.add(dust);
 
   return {
-    obstacles: OBSTACLES,
+    obstacles: pillarCircles as Circle[],
     sun,
     dispose() {
-      coneGeos.forEach((g) => g.dispose());
-      coneTex.dispose();
-      coneMat.dispose();
-      glassMat.dispose();
+      disposed = true;
+      beamMainMat.dispose();
+      beamSideMat.dispose();
+      beamTex.dispose();
+      glassTex.dispose();
+      sunTex.dispose();
+      floorTex.dispose();
+      dg.dispose();
     },
     update(dt: number, t: number, center: THREE.Vector3) {
+      if (disposed) return;
       sun.position.set(center.x + 22, center.y + 34, center.z + 14);
       sun.target.position.copy(center);
       sun.target.updateMatrixWorld();
       for (let i = 0; i < N; i++) {
-        dp[i * 3] += (dv[i * 3] + Math.sin(t * 0.4 + i) * 0.05) * dt;
+        dp[i * 3] += (dv[i * 3] + Math.sin(t * 0.4 + i) * 0.04) * dt;
         dp[i * 3 + 1] += dv[i * 3 + 1] * dt;
-        dp[i * 3 + 2] += (dv[i * 3 + 2] + Math.cos(t * 0.3 + i) * 0.05) * dt;
+        dp[i * 3 + 2] += (dv[i * 3 + 2] + Math.cos(t * 0.3 + i) * 0.04) * dt;
         if (dp[i * 3 + 1] > 20) dp[i * 3 + 1] = 0;
-        if (dp[i * 3] > 45) dp[i * 3] = -45;
-        if (dp[i * 3] < -45) dp[i * 3] = 45;
+        if (dp[i * 3] > 30) dp[i * 3] = -30;
+        if (dp[i * 3] < -30) dp[i * 3] = 30;
         if (dp[i * 3 + 2] > 13) dp[i * 3 + 2] = -13;
         if (dp[i * 3 + 2] < -13) dp[i * 3 + 2] = 13;
       }
       dg.attributes.position.needsUpdate = true;
     },
-  };
-}
-
-function rnd(seed: number) {
-  let s = seed;
-  return () => {
-    s = (s * 16807) % 2147483647;
-    return (s - 1) / 2147483646;
   };
 }
