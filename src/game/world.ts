@@ -93,6 +93,16 @@ export function buildWorld(scene: THREE.Scene) {
   });
   const beamGeo = new THREE.PlaneGeometry(5.6, 36);
 
+  // Cam: renksiz, pürüzsüz ve hafif saydam
+  const clearGlass = new THREE.MeshStandardMaterial({
+    color: 0xf6f9ff,
+    roughness: 0.05,
+    metalness: 0,
+    transparent: true,
+    opacity: 0.2,
+    depthWrite: false,
+  });
+
   // Katedral modeli (Blender'dan dışa aktarılmış GLB)
   new GLTFLoader().load(
     cathedralUrl,
@@ -103,8 +113,27 @@ export function buildWorld(scene: THREE.Scene) {
 
       const remap = new Map<THREE.Material, THREE.Material>();
       model.traverse((obj) => {
+        // Sade kapı: taş pervaz, demir kenar ve kapı halkaları gizlenir
+        if (/^Kapı (taş pervazı|demir kenarı|halkası)/.test(obj.name)) {
+          obj.visible = false;
+          return;
+        }
         if (!(obj instanceof THREE.Mesh)) return;
         const mat = obj.material;
+        if (mat instanceof THREE.MeshStandardMaterial && mat.name.startsWith('Kehribar cam')) {
+          // Renksiz, pürüzsüz cam: yalnızca ışık geçer
+          obj.material = clearGlass;
+          obj.castShadow = false;
+          obj.receiveShadow = false;
+          return;
+        }
+        if (mat instanceof THREE.MeshStandardMaterial && mat.name === 'Kapı | eski meşe') {
+          // Sade meşe kapı: süsleme yok, düz ahşap renk
+          if (!remap.has(mat)) remap.set(mat, toon(0x5b3b27));
+          obj.material = remap.get(mat)!;
+          obj.receiveShadow = true;
+          return;
+        }
         if (mat instanceof THREE.MeshStandardMaterial) {
           if (!remap.has(mat)) {
             remap.set(
