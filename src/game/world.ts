@@ -93,15 +93,28 @@ export function buildWorld(scene: THREE.Scene) {
   });
   const beamGeo = new THREE.PlaneGeometry(5.6, 36);
 
-  // Cam: renksiz, pürüzsüz ve hafif saydam
-  const clearGlass = new THREE.MeshStandardMaterial({
-    color: 0xf6f9ff,
-    roughness: 0.05,
-    metalness: 0,
+  // Pencere camı: sade, hafif amber tonlu ve saydam (ışık içinden geçer)
+  const amberGlass = new THREE.MeshBasicMaterial({
+    color: 0xffd6a0,
     transparent: true,
-    opacity: 0.2,
+    opacity: 0.38,
     depthWrite: false,
+    fog: false,
   });
+
+  // Pencere ışık huzmesi: pencere düzleminden odanın içine doğru iki düzlem
+  const addBeams = (win: THREE.Object3D) => {
+    const center = new THREE.Box3().setFromObject(win).getCenter(new THREE.Vector3());
+    const dir = new THREE.Vector3(-Math.sign(center.x) * 0.72, -0.62, 0).normalize();
+    for (let i = 0; i < 2; i++) {
+      const beam = new THREE.Mesh(beamGeo, beamMat);
+      beam.position.copy(center).addScaledVector(dir, 18);
+      beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      if (i === 1) beam.rotateY(Math.PI / 2);
+      beam.renderOrder = 3;
+      root.add(beam);
+    }
+  };
 
   // Katedral modeli (Blender'dan dışa aktarılmış GLB)
   new GLTFLoader().load(
@@ -119,22 +132,18 @@ export function buildWorld(scene: THREE.Scene) {
           return;
         }
         if (!(obj instanceof THREE.Mesh)) return;
+
         const mat = obj.material;
         if (mat instanceof THREE.MeshStandardMaterial && mat.name.startsWith('Kehribar cam')) {
-          // Renksiz, pürüzsüz cam: yalnızca ışık geçer
-          obj.material = clearGlass;
+          obj.material = amberGlass;
           obj.castShadow = false;
           obj.receiveShadow = false;
-          return;
-        }
-        if (mat instanceof THREE.MeshStandardMaterial && mat.name === 'Kapı | eski meşe') {
+        } else if (mat instanceof THREE.MeshStandardMaterial && mat.name === 'Kapı | eski meşe') {
           // Sade meşe kapı: süsleme yok, düz ahşap renk
           if (!remap.has(mat)) remap.set(mat, toon(0x5b3b27));
           obj.material = remap.get(mat)!;
           obj.receiveShadow = true;
-          return;
-        }
-        if (mat instanceof THREE.MeshStandardMaterial) {
+        } else if (mat instanceof THREE.MeshStandardMaterial) {
           if (!remap.has(mat)) {
             remap.set(
               mat,
@@ -152,17 +161,8 @@ export function buildWorld(scene: THREE.Scene) {
           mat.depthWrite = false;
         }
 
-        if (!obj.name.startsWith('Pencere_Isik')) return;
-        const center = new THREE.Box3().setFromObject(obj).getCenter(new THREE.Vector3());
-        const dir = new THREE.Vector3(-Math.sign(center.x) * 0.72, -0.62, 0).normalize();
-        for (let i = 0; i < 2; i++) {
-          const beam = new THREE.Mesh(beamGeo, beamMat);
-          beam.position.copy(center).addScaledVector(dir, 18);
-          beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-          if (i === 1) beam.rotateY(Math.PI / 2);
-          beam.renderOrder = 3;
-          root.add(beam);
-        }
+        // Huzmeler malzemeden bağımsız olarak her pencere için üretilir
+        if (obj.name.startsWith('Pencere_Isik')) addBeams(obj);
       });
     },
     undefined,
