@@ -156,7 +156,9 @@ function beamTexture() {
     g.globalCompositeOperation = 'destination-in';
     const h = g.createLinearGradient(0, 0, 64, 0);
     h.addColorStop(0, 'rgba(0,0,0,0)');
-    h.addColorStop(0.5, 'rgba(0,0,0,1)');
+    h.addColorStop(0.15, 'rgba(0,0,0,0.8)');
+    h.addColorStop(0.5, 'rgba(0,0,0,0.45)');
+    h.addColorStop(0.85, 'rgba(0,0,0,0.8)');
     h.addColorStop(1, 'rgba(0,0,0,0)');
     g.fillStyle = h;
     g.fillRect(0, 0, 64, 128);
@@ -190,6 +192,25 @@ function sunTexture() {
   });
 }
 
+// Büyük, sakin taş blok dokusu: geniş bloklar, ince derz, az ton farkı (tuğla değil)
+function stoneTexture() {
+  const r = rnd(7);
+  return canvasTexture(256, 256, (g) => {
+    g.fillStyle = '#9c7656';
+    g.fillRect(0, 0, 256, 256);
+    for (let row = 0; row < 2; row++) {
+      const y = row * 128;
+      const off = row % 2 ? 64 : 0;
+      for (let c = -1; c < 3; c++) {
+        const x = c * 128 + off;
+        const L = 0.96 + r() * 0.08;
+        g.fillStyle = `rgb(${Math.round(222 * L)},${Math.round(190 * L)},${Math.round(150 * L)})`;
+        g.fillRect(x + 2, y + 2, 124, 124);
+      }
+    }
+  });
+}
+
 function rnd(seed: number) {
   let s = seed;
   return () => {
@@ -203,9 +224,9 @@ export function buildWorld(scene: THREE.Scene) {
   scene.background = fogColor;
   scene.fog = new THREE.Fog(fogColor, 30, 95);
 
-  const hemi = new THREE.HemisphereLight(0xffe2b8, 0x4a3430, 1.0);
+  const hemi = new THREE.HemisphereLight(0xffe2b8, 0x3a2822, 0.8);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffd090, 1.8);
+  const sun = new THREE.DirectionalLight(0xffd090, 2.1);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   const sc = sun.shadow.camera;
@@ -250,7 +271,7 @@ export function buildWorld(scene: THREE.Scene) {
   const beamSideMat = beamMainMat.clone();
   beamSideMat.opacity = 0.11;
 
-  const wallMat = toon(C.wall);
+  const wallTex = stoneTexture();
   const stoneMat = toon(C.stone);
 
   // Zemin ve duvarlar
@@ -259,14 +280,19 @@ export function buildWorld(scene: THREE.Scene) {
   floor.receiveShadow = true;
   root.add(floor);
 
-  const wallGeo = [
-    new THREE.BoxGeometry(HALF_LEN * 2 + 1.2, WALL_H, 0.6).translate(0, WALL_H / 2, HALF_W + 0.3),
-    new THREE.BoxGeometry(HALF_LEN * 2 + 1.2, WALL_H, 0.6).translate(0, WALL_H / 2, -HALF_W - 0.3),
-    new THREE.BoxGeometry(0.6, WALL_H, HALF_W * 2 + 1.2).translate(HALF_LEN + 0.3, WALL_H / 2, 0),
-    new THREE.BoxGeometry(0.6, WALL_H, HALF_W * 2 + 1.2).translate(-HALF_LEN - 0.3, WALL_H / 2, 0),
+  // Her duvar kendi tekrar oranıyla: blok boyutu ~4 x 2.5 birim
+  const wallSpecs: [THREE.BufferGeometry, number, number][] = [
+    [new THREE.BoxGeometry(HALF_LEN * 2 + 1.2, WALL_H, 0.6).translate(0, WALL_H / 2, HALF_W + 0.3), (HALF_LEN * 2) / 4, WALL_H / 2.5],
+    [new THREE.BoxGeometry(HALF_LEN * 2 + 1.2, WALL_H, 0.6).translate(0, WALL_H / 2, -HALF_W - 0.3), (HALF_LEN * 2) / 4, WALL_H / 2.5],
+    [new THREE.BoxGeometry(0.6, WALL_H, HALF_W * 2 + 1.2).translate(HALF_LEN + 0.3, WALL_H / 2, 0), (HALF_W * 2) / 4, WALL_H / 2.5],
+    [new THREE.BoxGeometry(0.6, WALL_H, HALF_W * 2 + 1.2).translate(-HALF_LEN - 0.3, WALL_H / 2, 0), (HALF_W * 2) / 4, WALL_H / 2.5],
   ];
-  for (const g of wallGeo) {
-    const m = new THREE.Mesh(g, wallMat);
+  for (const [g, rx, ry] of wallSpecs) {
+    const t = wallTex.clone();
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(rx, ry);
+    t.needsUpdate = true;
+    const m = new THREE.Mesh(g, toon(0xffffff, { map: t }));
     m.receiveShadow = true;
     root.add(m);
   }
