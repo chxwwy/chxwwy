@@ -51,8 +51,8 @@ const C = {
   dais: 0xb48c68,
   altar: 0x7a4a36,
   cloth: 0xf2e4c8,
-  pew: 0x7a4c30,
-  pewEnd: 0x643e26,
+  pew: 0x9a6a44,
+  pewEnd: 0x7a5034,
   doorLeaf: 0x8b5a34,
   doorPanel: 0x744a2b,
   knob: 0xd9b06a,
@@ -112,7 +112,12 @@ function vaultGeometry() {
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setIndex(idx);
   g.computeVertexNormals();
-  return g;
+  // Tonoz: duvar birleşimi (yan kenarlar) ve tepe daha karanlık, orta kemer açık
+  return shadeVertices(g, (_x, y, z) => {
+    const edge = 1 - 0.3 * (1 - smoothstep(0, 4, HALF_W - Math.abs(z)));
+    const crown = 1 - 0.08 * smoothstep(0.6, 1, Math.abs(z) / HALF_W);
+    return edge * crown * (0.85 + 0.15 * smoothstep(WALL_H, WALL_H + HALF_W, y));
+  });
 }
 
 // Tek bir sıra: oturma yüzü +x'e (kürsüye) bakar, sırtlık -x tarafındadır
@@ -169,8 +174,8 @@ function beamTexture() {
 function sunTexture() {
   return canvasTexture(512, 512, (g) => {
     g.translate(256, 256);
-    g.strokeStyle = '#b8773a';
-    g.fillStyle = '#b8773a';
+    g.strokeStyle = '#8a6a4e';
+    g.fillStyle = '#8a6a4e';
     g.lineWidth = 16;
     g.beginPath();
     g.arc(0, 0, 190, 0, Math.PI * 2);
@@ -192,22 +197,162 @@ function sunTexture() {
   });
 }
 
-// Büyük, sakin taş blok dokusu: geniş bloklar, ince derz, az ton farkı (tuğla değil)
+// Köşe gölgelendirmesi: her köşeye yüksekliğe/konuma göre koyu-açık ton yazar.
+// Taban ve tavan kenarları, sütun ve duvar birleşimleri daha karanlık görünür.
+function shadeVertices(geo: THREE.BufferGeometry, fn: (x: number, y: number, z: number) => number) {
+  const pos = geo.attributes.position;
+  const col = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const v = fn(pos.getX(i), pos.getY(i), pos.getZ(i));
+    col[i * 3] = v;
+    col[i * 3 + 1] = v;
+    col[i * 3 + 2] = v;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return geo;
+}
+
+const smoothstep = (a: number, b: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+// Duvarlar: tabanda kir/nem karartısı, tavana doğru hafif kararma
+function wallAO(x: number, y: number, z: number) {
+  const floor = 0.55 + 0.45 * smoothstep(0, 4.5, y);
+  const ceil = 1 - 0.18 * smoothstep(WALL_H - 5, WALL_H, y);
+  const edge = 1 - 0.12 * (1 - smoothstep(0, 1.5, Math.min(Math.abs(Math.abs(z) - HALF_W), Math.abs(Math.abs(x) - HALF_LEN))));
+  return floor * ceil * edge;
+}
+
+// Noise katmanı: canvas üstüne ince grenli doku (taş yüzeyi)
+function addGrain(g: CanvasRenderingContext2D, w: number, h: number, amount: number, seed: number) {
+  const img = g.getImageData(0, 0, w, h);
+  const d = img.data;
+  const r = rnd(seed);
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (r() - 0.5) * amount;
+    d[i] = Math.max(0, Math.min(255, d[i] + n * 255));
+    d[i + 1] = Math.max(0, Math.min(255, d[i + 1] + n * 230));
+    d[i + 2] = Math.max(0, Math.min(255, d[i + 2] + n * 200));
+  }
+  g.putImageData(img, 0, 0);
+}
+
+// Büyük taş blok dokusu (duvar): 2 sıra, derz, blok içi kenar ışığı/gölgesi, leke ve gren
 function stoneTexture() {
   const r = rnd(7);
-  return canvasTexture(256, 256, (g) => {
-    g.fillStyle = '#9c7656';
-    g.fillRect(0, 0, 256, 256);
-    for (let row = 0; row < 2; row++) {
-      const y = row * 128;
-      const off = row % 2 ? 64 : 0;
-      for (let c = -1; c < 3; c++) {
-        const x = c * 128 + off;
-        const L = 0.96 + r() * 0.08;
-        g.fillStyle = `rgb(${Math.round(222 * L)},${Math.round(190 * L)},${Math.round(150 * L)})`;
-        g.fillRect(x + 2, y + 2, 124, 124);
+  const S = 512;
+  return canvasTexture(S, S, (g) => {
+    const mortar = '#6e5d50';
+    g.fillStyle = mortar;
+    g.fillRect(0, 0, S, S);
+    const rows = 2;
+    const cols = 4;
+    const bh = S / rows;
+    const bw = S / cols;
+    for (let row = 0; row < rows; row++) {
+      const off = row % 2 ? bw / 2 : 0;
+      for (let c = -1; c <= cols; c++) {
+        const x = c * bw + off;
+        const y = row * bh;
+        const L = 0.9 + r() * 0.16;
+        const warm = r() * 0.08;
+        const base = [
+          Math.round(204 * L * (1 + warm)),
+          Math.round(186 * L),
+          Math.round(164 * L * (1 - warm * 0.5)),
+        ];
+        // Blok gövdesi
+        const grd = g.createLinearGradient(0, y + 4, 0, y + bh - 4);
+        grd.addColorStop(0, `rgb(${base[0] + 12},${base[1] + 10},${base[2] + 8})`);
+        grd.addColorStop(0.6, `rgb(${base[0]},${base[1]},${base[2]})`);
+        grd.addColorStop(1, `rgb(${base[0] - 26},${base[1] - 24},${base[2] - 20})`);
+        g.fillStyle = grd;
+        g.fillRect(x + 5, y + 5, bw - 10, bh - 10);
+        // Blok içinde yumuşak lekeler
+        for (let k = 0; k < 6; k++) {
+          const bx = x + 10 + r() * (bw - 20);
+          const by = y + 10 + r() * (bh - 20);
+          const rad = 10 + r() * 30;
+          const sp = g.createRadialGradient(bx, by, 0, bx, by, rad);
+          const dark = r() < 0.6;
+          sp.addColorStop(0, dark ? 'rgba(70,40,20,0.08)' : 'rgba(255,240,210,0.07)');
+          sp.addColorStop(1, 'rgba(0,0,0,0)');
+          g.fillStyle = sp;
+          g.fillRect(bx - rad, by - rad, rad * 2, rad * 2);
+        }
+        // Kenar bevel: üst-sol açık, alt-sağ koyu
+        g.fillStyle = 'rgba(255,236,200,0.35)';
+        g.fillRect(x + 5, y + 5, bw - 10, 2);
+        g.fillRect(x + 5, y + 5, 2, bh - 10);
+        g.fillStyle = 'rgba(30,15,8,0.35)';
+        g.fillRect(x + 5, y + bh - 7, bw - 10, 2);
+        g.fillRect(x + bw - 7, y + 5, 2, bh - 10);
       }
     }
+    // Çatlak ve kir izleri
+    g.strokeStyle = 'rgba(40,28,20,0.25)';
+    g.lineWidth = 1.2;
+    for (let k = 0; k < 14; k++) {
+      let x0 = r() * S;
+      let y0 = r() * S;
+      g.beginPath();
+      g.moveTo(x0, y0);
+      for (let q = 0; q < 4; q++) {
+        x0 += (r() - 0.5) * 26;
+        y0 += (r() - 0.5) * 26;
+        g.lineTo(x0, y0);
+      }
+      g.stroke();
+    }
+    addGrain(g, S, S, 0.09, 31);
+  });
+}
+
+// Taş döşeme: 4x4 düzensiz dörtgen plaka, derzli, her plaka farklı tonda
+function floorStoneTexture() {
+  const r = rnd(19);
+  const S = 512;
+  return canvasTexture(S, S, (g) => {
+    g.fillStyle = '#6f6660';
+    g.fillRect(0, 0, S, S);
+    const n = 4;
+    const cell = S / n;
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        const jx = (r() - 0.5) * 14;
+        const jy = (r() - 0.5) * 14;
+        const x = i * cell + 3 + jx;
+        const y = j * cell + 3 + jy;
+        const L = 0.9 + r() * 0.14;
+        const grd = g.createLinearGradient(x, y, x + cell, y + cell);
+        grd.addColorStop(0, `rgb(${Math.round(218 * L)},${Math.round(204 * L)},${Math.round(184 * L)})`);
+        grd.addColorStop(1, `rgb(${Math.round(182 * L)},${Math.round(168 * L)},${Math.round(150 * L)})`);
+        g.fillStyle = grd;
+        g.fillRect(x, y, cell - 6 + (r() - 0.5) * 6, cell - 6 + (r() - 0.5) * 6);
+        for (let k = 0; k < 5; k++) {
+          const bx = x + r() * cell;
+          const by = y + r() * cell;
+          const rad = 8 + r() * 26;
+          const sp = g.createRadialGradient(bx, by, 0, bx, by, rad);
+          sp.addColorStop(0, r() < 0.5 ? 'rgba(90,55,30,0.10)' : 'rgba(255,245,220,0.08)');
+          sp.addColorStop(1, 'rgba(0,0,0,0)');
+          g.fillStyle = sp;
+          g.fillRect(bx - rad, by - rad, rad * 2, rad * 2);
+        }
+        // Kenar kirliliği
+        const dirt = g.createLinearGradient(x, y + cell - 8, x, y);
+        dirt.addColorStop(0, 'rgba(60,50,46,0.18)');
+        dirt.addColorStop(0.3, 'rgba(60,50,46,0)');
+        g.fillStyle = dirt;
+        g.fillRect(x, y, cell - 6, cell - 6);
+        // Plaka kenarında aşınma çizgisi
+        g.fillStyle = 'rgba(255,240,215,0.25)';
+        g.fillRect(x, y, cell - 8, 2);
+      }
+    }
+    addGrain(g, S, S, 0.11, 47);
   });
 }
 
@@ -220,13 +365,15 @@ function rnd(seed: number) {
 }
 
 export function buildWorld(scene: THREE.Scene) {
-  const fogColor = new THREE.Color(0x8e6246);
+  // Sis: sıcak sepya yerine soğuk-mor bir taş iç mekân havası; uzak duvarlar mesafeyle kaybolur
+  const fogColor = new THREE.Color(0x4a4150);
   scene.background = fogColor;
-  scene.fog = new THREE.Fog(fogColor, 30, 95);
+  scene.fog = new THREE.Fog(fogColor, 26, 92);
 
-  const hemi = new THREE.HemisphereLight(0xffe2b8, 0x3a2822, 0.8);
+  // Gökyüzü ışığı soğuk, zemin yansıması sıcak: gölgeler mavimsi, ışık huzmeleri altın
+  const hemi = new THREE.HemisphereLight(0xc4d4f2, 0x5a4a50, 1.0);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffd090, 2.1);
+  const sun = new THREE.DirectionalLight(0xffd6a0, 2.6);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   const sc = sun.shadow.camera;
@@ -247,13 +394,7 @@ export function buildWorld(scene: THREE.Scene) {
   const glassTex = glassTexture();
   const beamTex = beamTexture();
   const sunTex = sunTexture();
-  const floorTex = canvasTexture(128, 128, (g) => {
-    g.fillStyle = '#dcbb93';
-    g.fillRect(0, 0, 128, 128);
-    g.fillStyle = '#c69f74';
-    g.fillRect(0, 0, 128, 3);
-    g.fillRect(0, 0, 3, 128);
-  });
+  const floorTex = floorStoneTexture();
   floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
   floorTex.repeat.set(HALF_LEN / 2, HALF_W / 2);
 
@@ -265,11 +406,11 @@ export function buildWorld(scene: THREE.Scene) {
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     side: THREE.DoubleSide,
-    opacity: 0.17,
+    opacity: 0.3,
     fog: false,
   });
   const beamSideMat = beamMainMat.clone();
-  beamSideMat.opacity = 0.11;
+  beamSideMat.opacity = 0.2;
 
   const wallTex = stoneTexture();
   const stoneMat = toon(C.stone);
@@ -282,23 +423,48 @@ export function buildWorld(scene: THREE.Scene) {
 
   // Her duvar kendi tekrar oranıyla: blok boyutu ~4 x 2.5 birim
   const wallSpecs: [THREE.BufferGeometry, number, number][] = [
-    [new THREE.BoxGeometry(HALF_LEN * 2 + 1.2, WALL_H, 0.6).translate(0, WALL_H / 2, HALF_W + 0.3), (HALF_LEN * 2) / 4, WALL_H / 2.5],
-    [new THREE.BoxGeometry(HALF_LEN * 2 + 1.2, WALL_H, 0.6).translate(0, WALL_H / 2, -HALF_W - 0.3), (HALF_LEN * 2) / 4, WALL_H / 2.5],
-    [new THREE.BoxGeometry(0.6, WALL_H, HALF_W * 2 + 1.2).translate(HALF_LEN + 0.3, WALL_H / 2, 0), (HALF_W * 2) / 4, WALL_H / 2.5],
-    [new THREE.BoxGeometry(0.6, WALL_H, HALF_W * 2 + 1.2).translate(-HALF_LEN - 0.3, WALL_H / 2, 0), (HALF_W * 2) / 4, WALL_H / 2.5],
+    [shadeVertices(new THREE.BoxGeometry(HALF_LEN * 2 + 1.2, WALL_H, 0.6).translate(0, WALL_H / 2, HALF_W + 0.3), wallAO), (HALF_LEN * 2) / 8, WALL_H / 5],
+    [shadeVertices(new THREE.BoxGeometry(HALF_LEN * 2 + 1.2, WALL_H, 0.6).translate(0, WALL_H / 2, -HALF_W - 0.3), wallAO), (HALF_LEN * 2) / 8, WALL_H / 5],
+    [shadeVertices(new THREE.BoxGeometry(0.6, WALL_H, HALF_W * 2 + 1.2).translate(HALF_LEN + 0.3, WALL_H / 2, 0), wallAO), (HALF_W * 2) / 8, WALL_H / 5],
+    [shadeVertices(new THREE.BoxGeometry(0.6, WALL_H, HALF_W * 2 + 1.2).translate(-HALF_LEN - 0.3, WALL_H / 2, 0), wallAO), (HALF_W * 2) / 8, WALL_H / 5],
   ];
   for (const [g, rx, ry] of wallSpecs) {
     const t = wallTex.clone();
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(rx, ry);
     t.needsUpdate = true;
-    const m = new THREE.Mesh(g, toon(0xffffff, { map: t }));
+    const m = new THREE.Mesh(g, toon(0xffffff, { map: t, vertexColors: true }));
     m.receiveShadow = true;
     root.add(m);
   }
 
+  // Mimari detay: duvar tabanında kaide (plinth) ve tonoz hizasında kornişi
+  {
+    const molding = toon(C.stone, { vertexColors: false });
+    const L = HALF_LEN * 2 + 1.2;
+    const W = HALF_W * 2 + 1.2;
+    const parts = [
+      new THREE.BoxGeometry(L, 0.7, 0.3).translate(0, 0.35, HALF_W - 0.1),
+      new THREE.BoxGeometry(L, 0.7, 0.3).translate(0, 0.35, -HALF_W + 0.1),
+      new THREE.BoxGeometry(0.3, 0.7, W).translate(HALF_LEN - 0.1, 0.35, 0),
+      new THREE.BoxGeometry(0.3, 0.7, W).translate(-HALF_LEN + 0.1, 0.35, 0),
+    ];
+    const plinthGeo = shadeVertices(mergeGeometries(parts)!, (_x, y) => 0.8 + 0.2 * smoothstep(0, 0.7, y));
+    const plinth = new THREE.Mesh(plinthGeo, toon(C.stone, { vertexColors: true }));
+    plinth.receiveShadow = true;
+    root.add(plinth);
+    const cornParts = [
+      new THREE.BoxGeometry(L, 0.5, 0.5).translate(0, WALL_H - 0.25, HALF_W - 0.05),
+      new THREE.BoxGeometry(L, 0.5, 0.5).translate(0, WALL_H - 0.25, -HALF_W + 0.05),
+    ];
+    const cg = mergeGeometries(cornParts)!;
+    const cornice = new THREE.Mesh(cg, molding);
+    cornice.receiveShadow = true;
+    root.add(cornice);
+  }
+
   // Tonoz ve tonoz kaburgaları
-  const vault = new THREE.Mesh(vaultGeometry(), toon(C.vault, { side: THREE.DoubleSide }));
+  const vault = new THREE.Mesh(vaultGeometry(), toon(C.vault, { side: THREE.DoubleSide, vertexColors: true }));
   vault.receiveShadow = true;
   root.add(vault);
   const ribMat = toon(C.rib);
@@ -330,7 +496,7 @@ export function buildWorld(scene: THREE.Scene) {
     m.receiveShadow = true;
     root.add(m);
   };
-  pillarMesh(shafts, toon(C.pillar));
+  pillarMesh(shafts.map(g => shadeVertices(g, (_x, y) => 0.7 + 0.3 * smoothstep(0, 5, y))), toon(C.pillar, { vertexColors: true }));
   pillarMesh(bases, toon(C.capital));
   pillarMesh(capitals, toon(C.capital));
 
@@ -426,7 +592,7 @@ export function buildWorld(scene: THREE.Scene) {
   {
     const sunDecal = new THREE.Mesh(
       new THREE.PlaneGeometry(8, 8),
-      new THREE.MeshBasicMaterial({ map: sunTex, transparent: true, depthWrite: false, fog: false, opacity: 0.85 })
+      new THREE.MeshBasicMaterial({ map: sunTex, transparent: true, depthWrite: false, fog: false, opacity: 0.5, color: 0xfff1d8 })
     );
     sunDecal.rotation.x = -Math.PI / 2;
     sunDecal.position.y = 0.015;
@@ -477,6 +643,26 @@ export function buildWorld(scene: THREE.Scene) {
       root.add(m);
     }
   };
+  // Ana pencere: pencere önünde yumuşak, katmanlı ışık halesi (bloom taklidi)
+  {
+    const haloTex = canvasTexture(128, 128, (g) => {
+      const r = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+      r.addColorStop(0, 'rgba(255,220,150,0.9)');
+      r.addColorStop(0.5, 'rgba(255,190,110,0.25)');
+      r.addColorStop(1, 'rgba(255,170,90,0)');
+      g.fillStyle = r;
+      g.fillRect(0, 0, 128, 128);
+    });
+    const halo = new THREE.Mesh(
+      new THREE.PlaneGeometry(MAIN_WIN.w * 2.4, MAIN_WIN.h * 1.7),
+      new THREE.MeshBasicMaterial({ map: haloTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, opacity: 0.55, side: THREE.DoubleSide })
+    );
+    halo.position.set(HALF_LEN - 0.6, MAIN_WIN.y0 + MAIN_WIN.h * 0.5, 0);
+    halo.rotation.y = Math.PI / 2;
+    halo.renderOrder = 3;
+    root.add(halo);
+  }
+
   // Büyük pencere: en belirgin huzme
   addBeam(
     new THREE.Vector3(HALF_LEN - 0.8, MAIN_WIN.y0 + MAIN_WIN.h * 0.5, 0),
