@@ -94,13 +94,10 @@ export function buildWorld(scene: THREE.Scene) {
   });
   const beamGeos: THREE.PlaneGeometry[] = [];
 
-  // Kutsal pencere camı: sıcak turuncu parıltı
+  // Kutsal pencere camı
+  // Dolu, sıcak turuncu-altın cam: arkadaki duvar dokusu camdan görünmez
   const amberGlass = new THREE.MeshBasicMaterial({
-    color: 0xff9a3c,
-    transparent: true,
-    opacity: 0.5,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
+    color: 0xffb25e,
     fog: false,
   });
 
