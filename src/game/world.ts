@@ -40,19 +40,19 @@ const PEW_SEGS: [number, number][] = [
 const PEW_LEN = 4.0;
 
 const C = {
-  wall: 0xbf9274,
-  vault: 0xdcbc96,
-  floor: 0xdcbb93,
-  floorLine: 0xc69f74,
-  pillar: 0xd2ac86,
-  capital: 0xe8cfa6,
-  rib: 0xcaa27a,
-  stone: 0xe3c9a0,
-  dais: 0xcaa27a,
+  wall: 0xa8785a,
+  vault: 0xc39d76,
+  floor: 0xcaa37a,
+  floorLine: 0xa6805a,
+  pillar: 0xb48c68,
+  capital: 0xd2b088,
+  rib: 0x9c7456,
+  stone: 0xd4b28a,
+  dais: 0xb48c68,
   altar: 0x7a4a36,
   cloth: 0xf2e4c8,
-  pew: 0x9c6a43,
-  pewEnd: 0x84553a,
+  pew: 0x7a4c30,
+  pewEnd: 0x643e26,
   doorLeaf: 0x8b5a34,
   doorPanel: 0x744a2b,
   knob: 0xd9b06a,
@@ -119,11 +119,15 @@ function vaultGeometry() {
 function pewParts(x: number, z: number) {
   return {
     wood: [
-      box(0.85, 0.14, PEW_LEN, x, 0.5, z), // oturak
-      box(0.14, 1.0, PEW_LEN, x - 0.42, 1.05, z), // sırtlık
-      box(0.7, 0.45, PEW_LEN - 0.4, x, 0.22, z), // gövde
+      box(0.8, 0.1, PEW_LEN, x, 0.5, z), // oturak
+      box(0.09, 0.8, PEW_LEN, x - 0.38, 0.95, z), // sırtlık (ince)
+      box(0.16, 0.1, PEW_LEN, x - 0.38, 1.38, z), // sırtlık üst kenarı
+      box(0.55, 0.42, PEW_LEN - 0.3, x, 0.21, z), // alçak kaide
     ],
-    ends: [box(0.85, 1.0, 0.14, x, 0.5, z - PEW_LEN / 2 + 0.07), box(0.85, 1.0, 0.14, x, 0.5, z + PEW_LEN / 2 - 0.07)],
+    ends: [
+      box(0.12, 0.62, 0.1, x - 0.02, 0.5, z - PEW_LEN / 2 + 0.05),
+      box(0.12, 0.62, 0.1, x - 0.02, 0.5, z + PEW_LEN / 2 - 0.05),
+    ],
   };
 }
 
@@ -195,13 +199,13 @@ function rnd(seed: number) {
 }
 
 export function buildWorld(scene: THREE.Scene) {
-  const fogColor = new THREE.Color(0xc69764);
+  const fogColor = new THREE.Color(0x8e6246);
   scene.background = fogColor;
-  scene.fog = new THREE.Fog(fogColor, 38, 110);
+  scene.fog = new THREE.Fog(fogColor, 30, 95);
 
-  const hemi = new THREE.HemisphereLight(0xffe9c8, 0x6a4a44, 1.25);
+  const hemi = new THREE.HemisphereLight(0xffe2b8, 0x4a3430, 1.0);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffdca0, 1.9);
+  const sun = new THREE.DirectionalLight(0xffd090, 1.8);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   const sc = sun.shadow.camera;
@@ -240,11 +244,11 @@ export function buildWorld(scene: THREE.Scene) {
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     side: THREE.DoubleSide,
-    opacity: 0.3,
+    opacity: 0.17,
     fog: false,
   });
   const beamSideMat = beamMainMat.clone();
-  beamSideMat.opacity = 0.17;
+  beamSideMat.opacity = 0.11;
 
   const wallMat = toon(C.wall);
   const stoneMat = toon(C.stone);
@@ -304,12 +308,6 @@ export function buildWorld(scene: THREE.Scene) {
   pillarMesh(bases, toon(C.capital));
   pillarMesh(capitals, toon(C.capital));
 
-  // Duvarda yatay kornişler (sütunları birbirine bağlar)
-  for (const s of [-1, 1]) {
-    const cornice = new THREE.Mesh(new THREE.BoxGeometry(HALF_LEN * 2, 0.6, 0.5), toon(C.capital));
-    cornice.position.set(0, 16.2, s * (HALF_W - 0.25));
-    root.add(cornice);
-  }
 
   // Pencere çerçevesi (taş) ve cam: kemerli yüzey, içinde çubuk yok
   function addWindow(x: number, rotY: number, win: { w: number; h: number; y0: number }, frameZ: number, glassZ: number, frameDepth = 0.3) {
@@ -446,8 +444,8 @@ export function buildWorld(scene: THREE.Scene) {
   };
   const addBeam = (from: THREE.Vector3, to: THREE.Vector3, topW: number, botW: number, axis1: THREE.Vector3, mat: THREE.Material) => {
     const dir = new THREE.Vector3().subVectors(to, from).normalize();
-    const axis2 = new THREE.Vector3().crossVectors(dir, axis1).normalize();
-    for (const axis of [axis1, axis2]) {
+    const planes = [0, Math.PI / 3, (2 * Math.PI) / 3].map((a) => axis1.clone().applyAxisAngle(dir, a).normalize());
+    for (const axis of planes) {
       const m = new THREE.Mesh(beamAxisQuad(from, to, topW, botW, axis), mat);
       m.renderOrder = 4;
       root.add(m);
