@@ -81,36 +81,51 @@ export function buildWorld(scene: THREE.Scene) {
   scene.add(root);
   let disposed = false;
 
-  // Pencere ışık huzmeleri
+  // Işık huzmesi: turuncu-altın, yumuşak kenarlı, toplamsal karışım
   const beamMat = new THREE.MeshBasicMaterial({
     map: beamTexture(),
+    color: 0xff9a4a,
     transparent: true,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     side: THREE.DoubleSide,
-    opacity: 0.32,
+    opacity: 0.45,
     fog: false,
   });
-  const beamGeo = new THREE.PlaneGeometry(5.6, 36);
+  const beamGeos: THREE.PlaneGeometry[] = [];
 
-  // Pencere camı: sade, hafif amber tonlu ve saydam (ışık içinden geçer)
+  // Kutsal pencere camı: sıcak turuncu parıltı
   const amberGlass = new THREE.MeshBasicMaterial({
-    color: 0xffd6a0,
+    color: 0xff9a3c,
     transparent: true,
-    opacity: 0.38,
+    opacity: 0.5,
+    blending: THREE.AdditiveBlending,
     depthWrite: false,
     fog: false,
   });
 
-  // Pencere ışık huzmesi: pencere düzleminden odanın içine doğru iki düzlem
+  // Pencere ışık huzmesi: pencere boyutuyla orantılı, zemine kadar uzanan iki düzlem
   const addBeams = (win: THREE.Object3D) => {
-    const center = new THREE.Box3().setFromObject(win).getCenter(new THREE.Vector3());
+    const box = new THREE.Box3().setFromObject(win);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
     const dir = new THREE.Vector3(-Math.sign(center.x) * 0.72, -0.62, 0).normalize();
-    for (let i = 0; i < 2; i++) {
-      const beam = new THREE.Mesh(beamGeo, beamMat);
-      beam.position.copy(center).addScaledVector(dir, 18);
-      beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-      if (i === 1) beam.rotateY(Math.PI / 2);
+    // pencere merkezinden zemine (y = 0) kadar olan yol
+    const length = center.y / Math.abs(dir.y);
+    const mid = center.clone().addScaledVector(dir, length / 2);
+    const zAxis = new THREE.Vector3(0, 0, 1);
+    const sideAxis = new THREE.Vector3().crossVectors(dir, zAxis).normalize();
+    const sheets: [THREE.Vector3, number][] = [
+      [zAxis, size.z],
+      [sideAxis, size.z * 0.6],
+    ];
+    for (const [axis, width] of sheets) {
+      const geo = new THREE.PlaneGeometry(width, length);
+      beamGeos.push(geo);
+      const beam = new THREE.Mesh(geo, beamMat);
+      const normal = new THREE.Vector3().crossVectors(axis, dir).normalize();
+      beam.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(axis, dir, normal));
+      beam.position.copy(mid);
       beam.renderOrder = 3;
       root.add(beam);
     }
@@ -204,7 +219,7 @@ export function buildWorld(scene: THREE.Scene) {
     sun,
     dispose() {
       disposed = true;
-      beamGeo.dispose();
+      beamGeos.forEach((g) => g.dispose());
       beamMat.map?.dispose();
       beamMat.dispose();
     },
