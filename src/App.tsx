@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Game, type CombatHUD } from './game/Game';
 
+// Aelyra düellosu geçici olarak kapalı: boss HUD ve düello butonu gizli
+const BOSS_ENABLED = false;
+
 const isTouch = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
 
 interface Prefs {
@@ -327,7 +330,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className={`boss-hud ${isTouch ? 'boss-hud-touch' : ''}`}>
+      <div className={`boss-hud ${isTouch ? 'boss-hud-touch' : ''}`} style={BOSS_ENABLED ? undefined : { display: 'none' }}>
         <div className="boss-heading">{hud.bossName}</div>
         <div
           role="progressbar"
@@ -359,7 +362,7 @@ export default function App() {
       )}
 
       <div className="duel-actions">
-        {!hud.engaged && hud.result === 'playing' && (
+        {BOSS_ENABLED && !hud.engaged && hud.result === 'playing' && (
           <button className="duel-start" onClick={act('duel')}>
             ⚔ Düelloyu başlat
           </button>

@@ -4,7 +4,10 @@ import { Dummy } from './dummy';
 import { ShadingController } from './shading';
 import { BladeBoss, type BossStrike } from './boss';
 type CombatTarget = Dummy | BladeBoss;
-import { buildWorld, ARENA, type Circle } from './world';
+import { buildWorld, ARENA_X, ARENA_Z, type Circle } from './world';
+
+// Aelyra yapay zekası (geçici olarak kapalı: sahneyi serbestçe incelemek için)
+const BOSS_AI_ENABLED = false;
 import { k, sample, type Key } from './toon';
 
 const V = THREE.Vector3;
@@ -346,9 +349,9 @@ export class Game {
 
     // mankenler
     const dpos: [number, number][] = [
-      [10, -6],
-      [13, -24],
-      [-12, -22],
+      [-16, -6.1],
+      [-6, 6.1],
+      [4, -6.1],
     ];
     for (const [x, z] of dpos) {
       const d = new Dummy(x, z);
@@ -388,6 +391,8 @@ export class Game {
       announce: (message) => { this.notice = message; this.noticeT = 2.5; },
       collide: (point, radius) => this.collide(point, radius, false),
     });
+    // Düello kapalıyken Aelyra modeli sahnede durmaz (orta koridor boş kalsın)
+    if (!BOSS_AI_ENABLED) this.boss.root.visible = false;
     this.shading = new ShadingController(this.scene, this.renderer);
     this.bind();
     this.resize();
@@ -871,7 +876,7 @@ export class Game {
 
     this.updateVitals(dt);
     if (this.result === 'playing') { this.updatePlayer(dt); this.updateHammerGirl(dt); }
-    this.boss.update(dt, this.pos, this.result === 'playing');
+    if (BOSS_AI_ENABLED) this.boss.update(dt, this.pos, this.result === 'playing');
     this.updateFx(dt, realDt);
     this.updateCamera(realDt);
 
@@ -906,8 +911,8 @@ export class Game {
     for (const d of this.dummies) push(d.pos.x, d.pos.z, d.radius);
     if (!includeBoss) push(this.pos.x, this.pos.z, 0.38);
     if (includeBoss && !this.boss.dead) push(this.boss.pos.x, this.boss.pos.z, this.boss.radius);
-    p.x = clamp(p.x, -ARENA, ARENA);
-    p.z = clamp(p.z, -ARENA, ARENA);
+    p.x = clamp(p.x, -ARENA_X, ARENA_X);
+    p.z = clamp(p.z, -ARENA_Z, ARENA_Z);
   }
 
   private updatePlayer(dt: number) {
@@ -1245,9 +1250,10 @@ export class Game {
     const sh = this.shake * this.cameraShake;
     this.camera.position.x += (Math.random() - 0.5) * sh;
     this.camera.position.y += (Math.random() - 0.5) * sh;
-    const lim = ARENA + 1.5;
-    this.camera.position.x = clamp(this.camera.position.x, -lim, lim);
-    this.camera.position.z = clamp(this.camera.position.z, -lim, lim);
+    const limX = ARENA_X + 1.5;
+    const limZ = ARENA_Z + 1.5;
+    this.camera.position.x = clamp(this.camera.position.x, -limX, limX);
+    this.camera.position.z = clamp(this.camera.position.z, -limZ, limZ);
     this.camera.lookAt(this.camTarget);
   }
 

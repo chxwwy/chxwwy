@@ -150,7 +150,7 @@ export class BladeBoss {
   reset() {
     this.hp = this.maxHp; this.dead = false; this.engaged = false; this.phase = 1;
     this.state = 'waiting'; this.timer = this.clock = this.attackIndex = this.eventIndex = this.deathT = this.flash = 0;
-    this.cooldown = 1.2; this.heading = 0; this.root.position.set(0, 0, -14);
+    this.cooldown = 1.2; this.heading = 0; this.root.position.set(12, 0, 0);
     this.root.rotation.set(0, 0, 0); this.body.position.set(0, 0, 0); this.body.rotation.set(0, 0, 0);
     this.root.scale.setScalar(1.12); this.wings.visible = this.warning.visible = this.slash.visible = false;
     this.dashReady = false;
